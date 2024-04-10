@@ -1,7 +1,7 @@
 from collections import defaultdict
 from typing import Callable, Iterable, Any, Tuple, Union, Dict, List
 
-pattern_type = Union[None, str, Tuple["Pattern"], ...]
+pattern_type = Union[None, str, Tuple["Pattern", ...]]
 
 
 class FLMetaClass(type):
