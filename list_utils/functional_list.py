@@ -4,31 +4,20 @@ from typing import Callable, Iterable, Any, Tuple, Union, Dict, List
 pattern_type = Union[None, str, Tuple["Pattern", ...]]
 
 
-class FLMetaClass(type):
+class FunctionalList(list):
 
-    def __getitem__(self, *args):
-        return FL(*args)
+    def map(self, mapper: Callable[[Any], Any]) -> "FunctionalList":
+        return FunctionalList(mapper(value) for value in self)
 
-
-class FL(list, metaclass=FLMetaClass):
-
-    def map(self, mapper: Callable[[Any], Any]) -> "FL":
-        return FL(mapper(value) for value in self)
-
-    def named_map(self, pattern: pattern_type, mapper: Callable[[Any, ...], Any]):
-        indexes = _get_indexes(pattern)
-        named_values = [_get_named_values(indexes, obj) for obj in self]
-        return FL(mapper(**values) for values in named_values)
-
-    def flatten(self) -> "FL":
+    def flatten(self) -> "FunctionalList":
         def iter_flatten():
             for iterable in self:
                 for value in iterable:
                     yield value
 
-        return FL(iter_flatten())
+        return FunctionalList(iter_flatten())
 
-    def flat_map(self, mapper: Callable[[Any], Iterable[Any]]) -> "FL":
+    def flat_map(self, mapper: Callable[[Any], Iterable[Any]]) -> "FunctionalList":
         return self.map(mapper).flatten()
 
     def reduce(self, reducer: Callable[[Any, Any], Any]) -> Any:
@@ -40,11 +29,11 @@ class FL(list, metaclass=FLMetaClass):
             value = reducer(value, next_value)
         return value
 
-    def reduce_by_key(self, reducer: Callable[[Any, Any], Any]) -> "FL":
-        key_values = FL(self._group_by_key().items())
+    def reduce_by_key(self, reducer: Callable[[Any, Any], Any]) -> "FunctionalList":
+        key_values = FunctionalList(self._group_by_key().items())
         return key_values.map(lambda e: (e[0], e[1].reduce(reducer)))
 
-    def join_by_key(self, other: "FL") -> "FL":
+    def join_by_key(self, other: "FunctionalList") -> "FunctionalList":
         self_grouped = self._group_by_key()
         other_grouped = other._group_by_key()
 
@@ -54,49 +43,24 @@ class FL(list, metaclass=FLMetaClass):
                     for other_value in other_grouped[key]:
                         yield key, (self_value, other_value)
 
-        return FL(iter_pairs())
+        return FunctionalList(iter_pairs())
 
-    def distinct(self) -> "FL":
+    def join_by_custom_key(self, other: "Fl", key_getter: Callable, other_key_getter: Callable, keep_key=False):
+        self_with_key = self.map(lambda obj: (key_getter(obj), obj))
+        other_with_key = other.map(lambda obj: (other_key_getter(obj), obj))
+        joined = self_with_key.join_by_key(other_with_key)
+        if not keep_key:
+            joined = joined.map(lambda obj: obj[1])
+        return joined
+
+    def distinct(self) -> "FunctionalList":
         return self \
             .map(lambda e: (e, 1)) \
             .reduce_by_key(lambda x, y: 1) \
             .map(lambda e: e[0])
 
-    def _group_by_key(self) -> defaultdict["FL"]:
-        key_values = defaultdict(FL)
+    def _group_by_key(self) -> defaultdict["FunctionalList"]:
+        key_values = defaultdict(FunctionalList)
         for key, value, *_ in self:
             key_values[key].append(value)
         return key_values
-
-
-def _get_indexes(pattern: pattern_type) -> Dict[str, List[int]]:
-    def yield_in_addresses(pattern_, parent=None):
-        if parent is None:
-            parent = []
-        for i, value in enumerate(pattern_):
-            match value:
-                case str() as name:
-                    yield name, parent + [i]
-                case tuple() as nested:
-                    yield from yield_in_addresses(nested, parent + [i])
-                case None:
-                    pass
-                case bad_type:
-                    raise NotImplementedError(f"expected a tuple, str or None, got: {bad_type}")
-
-    indexes = dict(yield_in_addresses(pattern))
-    return indexes
-
-
-def _get_named_values(indexes, obj) -> Dict[str, Any]:
-    def get_value(address, obj_):
-        for index in address:
-            obj_ = obj_[index]
-        return obj_
-
-    named_values = {
-        name: get_value(address, obj)
-        for name, address
-        in indexes.items()
-    }
-    return named_values
